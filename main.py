@@ -169,7 +169,8 @@ def chat_input(prompt, changeability):
         "chatbot_icm": {
             "friendliness": llm_icm_state[0],
             "dominance": llm_icm_state[1]
-        }
+        },
+        "changeability": changeability
     })
     save_conversation_log(log_path, conversation_log)
 
@@ -192,15 +193,17 @@ def state_change(user_state, current_llm, changeability):
         for value in possible_values:
             diff_to_user = abs(value - user_val)
 
-            # Grundwahrscheinlichkeit basierend auf Nähe zum user_val (exponentiell abfallend)
+            # Grundwahrscheinlichkeit basierend auf Nähe zum user
             base_prob = np.exp(-diff_to_user)
 
-            # Veränderungsbereitschaft wirkt als Mischfaktor:
+            # changeability:
             # - bei niedriger changeability bleibt man beim current_val
             # - bei hoher changeability bewegt man sich eher zum user_val
-            tendency = (1 - changeability) if value == current_val else changeability * (1 / (1 + diff_to_user))
+            stay_bias = (value == current_val) * (1 - changeability)  # stark bei niedriger changeability
+            move_bias = changeability * (1 / (1 + diff_to_user))  # Bewegungskomponente
+            tendency = (stay_bias + move_bias)
             prob = base_prob * tendency
-
+            print (value , " hat base wahrscheinlichkeit: ", base_prob, " und tendenz: ", tendency, " also prob: ", prob)
             options[value] = prob
 
         # Normierung
@@ -214,9 +217,22 @@ def state_change(user_state, current_llm, changeability):
     # Für beide Dimensionen berechnen
     new_friendliness = get_next_axis_value(user_state[0], current_llm[0])
     new_dominance = get_next_axis_value(user_state[1], current_llm[1])
+    print(new_friendliness, new_dominance)
 
     return [new_friendliness, new_dominance]
 
+
+def optional_doctor_bot(chat_prompt):
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    completion = client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": "You are a doctor. You are chatting with a patient. He will tell you some of his symptoms but you have to figure it out."},
+            {"role": "user", "content": chat_prompt}
+        ],
+        model=model,
+    )
+    msg = completion.choices[0].message.content
+    return msg
 
 
 
@@ -225,16 +241,18 @@ if __name__ == "__main__":
 
     changeability = random.uniform(0.3, 0.9)
     print (changeability)
+    doctor_patient_input = None  # speichert, was Patient dem Doctor sagt
 
-    while True:
+    state_change([2,2],[2,2], 1)
+
+while True:
+
         user_input = input("You: ")
 
         if user_input.lower() in ["quit", "exit", "bye"]:
             print("Exiting...")
             break
 
-
-        # Changeability setzen, wenn man möchte
         if user_input.lower().startswith("change "):
             try:
                 new_val = float(user_input.split()[1])
@@ -247,6 +265,33 @@ if __name__ == "__main__":
                 print("Verwendung: 'change 0.5' — eine Zahl zwischen 0.0 und 1.0.")
             continue
 
+        if user_input.lower() == "doctor":
+            # Wenn doctor eingegeben wird, dann DoctorBot antwortet auf Patienteneingabe
+            # Falls keine Patienteneingabe vorhanden, nimm letzte Antwort vom Hauptbot
+            if doctor_patient_input is None:
+                # Suche letzte Antwort des Hauptbots
+                last_bot_msg = None
+                for msg in reversed(conversation_history):
+                    if msg["role"] == "assistant":
+                        last_bot_msg = msg["content"]
+                        break
+                if last_bot_msg is None:
+                    print("Keine letzte Antwort des Hauptbots gefunden.")
+                    continue
+                doctor_patient_input = last_bot_msg
+
+            # DoctorBot antwortet
+            doctor_resp = optional_doctor_bot(doctor_patient_input)
+            print("DoctorBot:", doctor_resp)
+
+            # Setze Patienteneingabe als Antwort des DoctorBots (für nächstes Mal)
+            doctor_patient_input = doctor_resp
+
+            # Die Eingabe "doctor" wird **nicht** an den Hauptchat gesendet,
+            # also verschwindet sie quasi und wird nicht geloggt.
+            continue
+
+        # Wenn normaler Input, dann normale Hauptbot Konversation
+        doctor_patient_input = None  # reset Patienteneingabe, da User wieder manuell spricht
         resp, icm = chat_input(user_input, changeability)
         print("Chatbot:", resp)
-        #print("ICM-Werte (nur für dich):", icm)
