@@ -50,7 +50,7 @@ f = ["very friendly", "slightly friendly", "neutrally friendly", "slightly hosti
 d = ["very submissive","slightly submissive","neutrally submissive","slightly dominant","very dominant"]
 
 # startwert, noch zufällig machen
-llm_icm_state = [3, 3]
+llm_icm_state = [2, 2]
 
 # ======= instructions aus txt laden =======
 def load_dynamic_instructions(llm_icm_state):
@@ -179,30 +179,31 @@ def chat_input(prompt, changeability):
 # ========== ICM Update-Logik ==========
 def state_change(user_state, current_llm, changeability):
     """
-    changeability ∈ [0.0, 1.0]: 0 = fast unbeweglich, 1 = maximal reaktiv
+    changeability ∈ [0.0, 1.0]: 0 = unbeweglich, 1 = maximal reaktiv
+    user_state: [friendliness, dominance] ∈ [0..4]
+    current_llm: [friendliness, dominance] ∈ [0..4]
+    returns: [new_friendliness, new_dominance]
     """
-
+    
     def get_next_axis_value(user_val, current_val):
-        dx = user_val - current_val
-        direction = int(np.sign(dx))
-
+        possible_values = range(5)
         options = {}
 
-        # Hauptziel
-        target = current_val + direction
-        if 0 <= target <= 4:
-            options[target] = 0.4 * changeability
+        for value in possible_values:
+            diff_to_user = abs(value - user_val)
 
-        # Bleiben
-        options[current_val] = 0.5 + 0.5 * (1 - changeability)
+            # Grundwahrscheinlichkeit basierend auf Nähe zum user_val (exponentiell abfallend)
+            base_prob = np.exp(-diff_to_user)
 
-        # Streuung (in beide Richtungen!)
-        for delta in [-1, 1]:
-            neighbor = current_val + delta
-            if 0 <= neighbor <= 4 and neighbor != target:
-                options[neighbor] = 0.1 * changeability
+            # Veränderungsbereitschaft wirkt als Mischfaktor:
+            # - bei niedriger changeability bleibt man beim current_val
+            # - bei hoher changeability bewegt man sich eher zum user_val
+            tendency = (1 - changeability) if value == current_val else changeability * (1 / (1 + diff_to_user))
+            prob = base_prob * tendency
 
-        # Normalisieren
+            options[value] = prob
+
+        # Normierung
         total = sum(options.values())
         for k in options:
             options[k] /= total
@@ -210,7 +211,7 @@ def state_change(user_state, current_llm, changeability):
         values, weights = zip(*options.items())
         return random.choices(values, weights=weights, k=1)[0]
 
-    # Beide Achsen unabhängig berechnen
+    # Für beide Dimensionen berechnen
     new_friendliness = get_next_axis_value(user_state[0], current_llm[0])
     new_dominance = get_next_axis_value(user_state[1], current_llm[1])
 
