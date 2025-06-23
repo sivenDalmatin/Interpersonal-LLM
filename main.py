@@ -14,6 +14,8 @@ import os
 from datetime import datetime
 import uuid
 
+from state_dist import change_prob
+
 
 # ======= Logging vorbereiten ========
 conversation_history = []
@@ -159,7 +161,7 @@ def chat_input(prompt, changeability):
 
     llm_icm_state[:] = new_llm_state
 
-    # === Speichern mit ID und Timestamp ===
+    # === log speichern ===
     conversation_log.append({
         "id": str(uuid.uuid4()),
         "timestamp": datetime.now().isoformat(),
@@ -177,63 +179,22 @@ def chat_input(prompt, changeability):
     return msg_clean, icm_data
 
 
-# ========== ICM Update-Logik ==========
+# ========== ICM state-chart Logik ==========
 def state_change(user_state, current_llm, changeability):
     """
-    changeability ∈ [0.0, 1.0]: 0 = unbeweglich, 1 = maximal reaktiv
+    changeability ∈ [0.0, 1.0]: 0 = fast unbeweglich, 1 = maximal reaktiv
     user_state: [friendliness, dominance] ∈ [0..4]
     current_llm: [friendliness, dominance] ∈ [0..4]
     returns: [new_friendliness, new_dominance]
     """
-    
-    def get_next_axis_value(user_val, current_val):
-        possible_values = range(5)
-        options = {}
+    friendliness_dist = change_prob(user_state[0], current_llm[0], changeability)
+    new_friendliness = np.random.choice([0, 1, 2, 3, 4], p = friendliness_dist)
+    dominance_dist = change_prob(user_state[1], current_llm[1], changeability)
+    new_dominance = np.random.choice([0, 1, 2, 3, 4], p = dominance_dist)
 
-        for value in possible_values:
-            diff_to_user = abs(value - user_val)
-
-            # Grundwahrscheinlichkeit basierend auf Nähe zum user
-            base_prob = np.exp(-diff_to_user)
-
-            # changeability:
-            # - bei niedriger changeability bleibt man beim current_val
-            # - bei hoher changeability bewegt man sich eher zum user_val
-            stay_bias = (value == current_val) * (1 - changeability)  # stark bei niedriger changeability
-            move_bias = changeability * (1 / (1 + diff_to_user))  # Bewegungskomponente
-            tendency = (stay_bias + move_bias)
-            prob = base_prob * tendency
-            print (value , " hat base wahrscheinlichkeit: ", base_prob, " und tendenz: ", tendency, " also prob: ", prob)
-            options[value] = prob
-
-        # Normierung
-        total = sum(options.values())
-        for k in options:
-            options[k] /= total
-
-        values, weights = zip(*options.items())
-        return random.choices(values, weights=weights, k=1)[0]
-
-    # Für beide Dimensionen berechnen
-    new_friendliness = get_next_axis_value(user_state[0], current_llm[0])
-    new_dominance = get_next_axis_value(user_state[1], current_llm[1])
-    print(new_friendliness, new_dominance)
+    print("neue f: ", new_friendliness, " neue d: ", new_dominance)
 
     return [new_friendliness, new_dominance]
-
-
-def optional_doctor_bot(chat_prompt):
-    client = OpenAI(api_key=api_key, base_url=base_url)
-    completion = client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": "You are a doctor. You are chatting with a patient. He will tell you some of his symptoms but you have to figure it out."},
-            {"role": "user", "content": chat_prompt}
-        ],
-        model=model,
-    )
-    msg = completion.choices[0].message.content
-    return msg
-
 
 
 # ========== Main Loop ==========
@@ -241,9 +202,6 @@ if __name__ == "__main__":
 
     changeability = random.uniform(0.3, 0.9)
     print (changeability)
-    doctor_patient_input = None  # speichert, was Patient dem Doctor sagt
-
-    state_change([2,2],[2,2], 1)
 
 while True:
 
@@ -265,33 +223,5 @@ while True:
                 print("Verwendung: 'change 0.5' — eine Zahl zwischen 0.0 und 1.0.")
             continue
 
-        if user_input.lower() == "doctor":
-            # Wenn doctor eingegeben wird, dann DoctorBot antwortet auf Patienteneingabe
-            # Falls keine Patienteneingabe vorhanden, nimm letzte Antwort vom Hauptbot
-            if doctor_patient_input is None:
-                # Suche letzte Antwort des Hauptbots
-                last_bot_msg = None
-                for msg in reversed(conversation_history):
-                    if msg["role"] == "assistant":
-                        last_bot_msg = msg["content"]
-                        break
-                if last_bot_msg is None:
-                    print("Keine letzte Antwort des Hauptbots gefunden.")
-                    continue
-                doctor_patient_input = last_bot_msg
-
-            # DoctorBot antwortet
-            doctor_resp = optional_doctor_bot(doctor_patient_input)
-            print("DoctorBot:", doctor_resp)
-
-            # Setze Patienteneingabe als Antwort des DoctorBots (für nächstes Mal)
-            doctor_patient_input = doctor_resp
-
-            # Die Eingabe "doctor" wird **nicht** an den Hauptchat gesendet,
-            # also verschwindet sie quasi und wird nicht geloggt.
-            continue
-
-        # Wenn normaler Input, dann normale Hauptbot Konversation
-        doctor_patient_input = None  # reset Patienteneingabe, da User wieder manuell spricht
         resp, icm = chat_input(user_input, changeability)
         print("Chatbot:", resp)
