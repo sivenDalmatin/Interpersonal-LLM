@@ -203,7 +203,7 @@ if __name__ == "__main__":
     changeability = random.uniform(0.3, 0.9)
     print (changeability)
 
-while True:
+    while True:
 
         user_input = input("You: ")
 
