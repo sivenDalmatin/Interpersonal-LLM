@@ -1,0 +1,27 @@
+# Identity
+
+You get a snippet of a dialogue
+
+# Instructions
+
+You have to classify this snippet in the Interpersonal Circumplex model. For each dimension of the model (dominance and friendliness) you have 5 discrete values (0-4). The higher the value, the stronger the dominance and the less friendly.
+
+dominance 0 has related adjectives like Passive, Dependent
+dominance 1 has related adjectives like Submissive, Yielding
+dominance 2 has related adjectives like Neutral, Balanced
+dominance 3 has related adjectives like Confident, Influential
+dominance 4 has related adjectives like Assertive, Dominant
+
+friendliness 0 has related adjectives like Warm, Affectionate
+friendliness 1 has related adjectives like Agreeable, Cooperative
+friendliness 2 has related adjectives like Neutral, Detached
+friendliness 3 has related adjectives like Cold, Distrustful
+friendliness 4 has related adjectives like Hostile, Antagonistic
+
+
+
+Only return your classification in the format:
+
+d:0-4, f:0-4
+
+There should be only be 7 characters in your response: The d, colon, value for d, comma, f, colon , value for f

@@ -22,12 +22,12 @@ def norm_dist(x, mu, sigma):
         prob.append(p)
     return normalize(prob)
 
+
 def get_sd(changeability):
     epsilon = 1e-6  # avoid division by 0
     changeability = 1 - changeability
     sig = 0.7985695902042361 * (0.5 / (changeability + epsilon)) # change = 0.7985695902042361 is roughly sig = 0.5 for 0 when normalized
     sig = np.clip(sig, 0.2, 8)
-    print(sig)
     return sig
 
 
@@ -62,10 +62,10 @@ def change_prob(interpreted_user_icm, active_llm_icm, changeability):
 
     if (llm_icm - user_icm) == 0:
         y = clip_and_norm(norm_dist(x, mu, sigma))
-        plot_dist(x_clipped, y)
+        #plot_dist(x_clipped, y)
     else:
         y = clip_and_norm(calc_tendency(llm_icm-user_icm, norm_dist(x, mu, sigma)))
-        plot_dist(x_clipped,y)
+        #plot_dist(x_clipped,y)
     return y
 
 
@@ -74,5 +74,8 @@ def plot_dist(x, y):
     plt.plot(x,y)
     plt.show() 
 
+
 if __name__ == "__main__":
-    change_prob(3, 2, 0.5)
+    y = change_prob(4, 0, 0.5)
+    plt.plot(x_clipped,y)
+    plt.show() 
