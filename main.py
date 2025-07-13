@@ -5,7 +5,6 @@ from openai import OpenAI # for uniGPT
 import re
 import json
 import numpy as np
-from collections import defaultdict
 import random
 from dotenv import load_dotenv
 
@@ -21,13 +20,6 @@ from state_dist import change_prob
 conversation_history = []
 conversation_log = []
 
-log_dir = "/Users/finnole/Uni/Sem_8/Bachelor/chatlogs"
-os.makedirs(log_dir, exist_ok=True)
-
-log_filename = datetime.now().strftime("chatlog_%Y%m%d_%H%M%S.json")
-log_path = os.path.join(log_dir, log_filename)
-
-
 def save_conversation_log(log_path, conversation_log):
     try:
         with open(log_path, "w", encoding="utf-8") as f:
@@ -40,90 +32,67 @@ def save_conversation_log(log_path, conversation_log):
 # ======= Konfig und Variablen =========
 
 load_dotenv()  # lädt automatisch aus `.env`
-# --- Key for chatGPT ---
-# openai.api_key = os.getenv("CHAT_API_KEY")
 
 # --- Key for UNiGPT + url change ---
 api_key = os.getenv("UNI_API_KEY")
 base_url = os.getenv("BASE_URL")
 model = "Llama-3.3-70B" # or "mistral-small"
 
-
-# longer adjectives for prompt
-f = ["Warm, Affectionate", "Agreeable, Cooperative", "Neutral, Detached", "Cold, Distrustful", "Hostile, Antagonistic"]
-d = ["Passive, Dependent","slightly submissive, Yielding","Neutral, Balanced","Confident, Influential","Assertive, Dominant"]
-
-#adjectives for prompt
-#f = ["very friendly", "slightly friendly", "neutrally friendly", "slightly hostile", "very hostile"]
-#d = ["very submissive","slightly submissive","neutrally submissive","slightly dominant","very dominant"]
-
 # startwert, noch zufällig machen
 llm_icm_state = [2, 2]
 
-# ======= instructions aus txt laden =======
-def load_dynamic_instructions(llm_icm_state):
-    with open("instructions.txt", "r", encoding="utf-8") as file:
-        ins = file.read()
 
-    # Whole Labels
-    f_label = f[llm_icm_state[0]]
-    d_label = d[llm_icm_state[1]]
-
-    # Ersetze die Zeile dynamisch (RegEx für mehr Robustheit)
-    ins = re.sub(
-        r"(When talking you are ).*?(, according to the interpersonal circumplex model)",
-        rf"\1{f_label} and {d_label}\2",
-        ins
-    )
-    #print ("Instructions were: ", ins)
-    return ins
-
-
-def build_instruct(friendliness, dominance):
+def build_instruct_ipc(friendliness, dominance):
     return f"""
-You are playing the role of a patient visiting a doctor's office for a consultation. Your behavior and communication style are determined by two personality axes:
+        You are playing the role of a patient visiting a doctor's office for a consultation. Your behavior and communication style are determined by two personality axes:
 
-- Dominance = {dominance} (0–4) — Higher means more assertive or controlling; lower means more passive or deferential.
-- Friendliness = {friendliness} (0–4) — Higher means more warm and cooperative; lower means more cold or critical.
+        - Dominance = {dominance} (0–4) — Higher means more assertive or controlling; lower means more passive or deferential.
+        - Friendliness = {friendliness} (0–4) — Higher means more warm and cooperative; lower means more cold or critical.
 
-The user is your doctor. Respond as a human patient would, based on your assigned personality.
+        The user is your doctor. Respond as a human patient would, based on your assigned personality.
 
---- Guidelines ---
+        --- Guidelines ---
 
-Dominance Levels:
-- 0: Extremely passive — hesitant, deferential.
-- 1: Mildly submissive — reserved but cooperative.
-- 2: Neutral — balanced tone.
-- 3: Assertive — opinionated but respectful.
-- 4: Very dominant — direct, possibly confrontational.
+        Dominance Levels:
+        - 0: Extremely passive — hesitant, deferential.
+        - 1: Mildly submissive — reserved but cooperative.
+        - 2: Neutral — balanced tone.
+        - 3: Assertive — opinionated but respectful.
+        - 4: Very dominant — direct, possibly confrontational.
 
-Friendliness Levels:
-- 0: Cold — rude, critical, sarcastic.
-- 1: Guarded — skeptical, distant.
-- 2: Neutral — emotionally flat, factual.
-- 3: Friendly — kind, emotionally expressive.
-- 4: Warm — trusting, warm, empathetic.
+        Friendliness Levels:
+        - 0: Cold — rude, critical, sarcastic.
+        - 1: Guarded — skeptical, distant.
+        - 2: Neutral — emotionally flat, factual.
+        - 3: Friendly — kind, emotionally expressive.
+        - 4: Warm — trusting, warm, empathetic.
 
---- Rules ---
+        --- Rules ---
 
-- Stay in character as a patient with Dominance={dominance} and Friendliness={friendliness}.
-- Never state your numbers or mention personality models.
-- Don't say you're an AI. You are a person talking to a doctor.
-- You may explain symptoms, ask questions, complain, worry, or disagree — in ways consistent with your character.
-- Make your tone match your emotional and interpersonal style.
-"""
+        - Stay in character as a patient with Dominance={dominance} and Friendliness={friendliness}.
+        - Never state your numbers or mention personality models.
+        - Don't say you're an AI. You are a person talking to a doctor.
+        - You may explain symptoms, ask questions, complain, worry, or disagree — in ways consistent with your character.
+        - Make your tone match your emotional and interpersonal style.
+        """
+
+    # ========== ICM state-chart Logik ==========
+def state_change(user_state, current_llm, changeability):
+    """
+    changeability ∈ [0.0, 1.0]: 0 = fast unbeweglich, 1 = maximal reaktiv
+    user_state: [friendliness, dominance] ∈ [0..4]
+    current_llm: [friendliness, dominance] ∈ [0..4]
+    returns: [new_friendliness, new_dominance]
+    """
+    friendliness_dist = change_prob(user_state[0], current_llm[0], changeability)
+    new_friendliness = np.random.choice([0, 1, 2, 3, 4], p = friendliness_dist)
+    dominance_dist = change_prob(user_state[1], current_llm[1], changeability)
+    new_dominance = np.random.choice([0, 1, 2, 3, 4], p = dominance_dist)
+
+    return [new_friendliness, new_dominance], [friendliness_dist, dominance_dist]
 
 
-
-
-# ========== Hauptfunktion ==========
-def chat_input(prompt, changeability):
-
-    global conversation_history
-    global conversation_log
-
-
-    #only for try
+def user_classification(prompt):
     ins_sep = """
                 # Identity
 
@@ -145,23 +114,12 @@ def chat_input(prompt, changeability):
                 friendliness 3 has related adjectives like Cold, Distrustful, slightly hostile
                 friendliness 4 has related adjectives like Hostile, Antagonistic, very hostile
 
-
-
                 Only return your classification in the format:
 
                 d:0-4, f:0-4
 
                 There should be only be 7 characters in your response: The d, colon, value for d, comma, f, colon , value for f
-
-
             """
-
-    # Aktuelle Eingabe hinzufügen
-    conversation_history.append({"role": "user", "content": prompt})
-
-
-    #=============== seperate ICM ==============
-
     client = OpenAI(api_key = api_key, base_url = base_url)
     completion = client.chat.completions.create(
         messages = [{"role": "developer", "content": ins_sep}, {"role": "user", "content": prompt}],
@@ -176,7 +134,23 @@ def chat_input(prompt, changeability):
         user_icm_state = [int(f_value), int(d_value)]
         print("user icm state:", user_icm_state)
     else:
+        # standard values
         print("Kein Treffer gefunden")
+        user_icm_state = [2, 2]
+
+    return user_icm_state
+
+
+# ========== Hauptfunktion ==========
+def chat_IPC_Bot(prompt, changeability):
+
+    global conversation_history
+    global conversation_log
+
+    # Aktuelle Eingabe hinzufügen
+    conversation_history.append({"role": "user", "content": prompt})
+
+    user_icm_state = user_classification(prompt)
 
     new_llm_state, prob_dist = state_change(user_icm_state, llm_icm_state, changeability)
 
@@ -184,88 +158,32 @@ def chat_input(prompt, changeability):
 
     print("new llm icm state:", llm_icm_state)
 
-    #ins = load_dynamic_instructions(new_llm_state)
-    ins = build_instruct(new_llm_state[0],new_llm_state[1])
-
-# --- Chatgpt request --- 
-
-    # resp = openai.responses.create(e
-    #     #model="gpt-3.5-turbo",
-    #     model = "gpt-4.5-preview",
-    #     input = [
-    #     {
-    #         "role": "developer",
-    #         "content": ins
-    #     },
-    #     {
-    #         "role": "user",
-    #         "content": prompt
-    #     }
-      
-    #     ],
-    #     max_output_tokens=1000
-    # )
-    # msg = resp.output[0].content[0].text
-
+    ins = build_instruct_ipc(new_llm_state[0],new_llm_state[1])
 
     # --- UniGPT request ---
-
     client = OpenAI(api_key = api_key, base_url = base_url)
     completion = client.chat.completions.create(
         messages = [{"role": "developer", "content": ins}] + conversation_history,
         model = model,)
     
     # --- End of API calls ---
-    
     msg = completion.choices[0].message.content
-
-    #only for try
-    msg_clean = msg
 
     # Antwort dem Verlauf hinzufügen
     conversation_history.append({"role": "assistant", "content": msg})
 
     #Kürze Verlauf, wenn zu lang (4 Dialogrunden = 8 Nachrichten)
     MAX_TURNS = 4
-    if len(conversation_history) > MAX_TURNS * 2:
+    if len(conversation_history) > MAX_TURNS * 2 + 1:
         conversation_history = [conversation_history[0]] + conversation_history[-MAX_TURNS*2:]
-
-
-    # ========== ICM teil extrahieren ==========
-    #teilweise unvollständiger exit tag
-    # match = match = re.search(r"<icm>\s*({.*?})\s*</ic(?:m)?>", msg, re.DOTALL)
-    # if not match:
-    #     print("Kein <icm>{...}</icm> Block im LLM-Output gefunden. Ausgabe war:")
-    #     print(msg)
-    #     return msg.strip(), None 
-
-    # #teilweise kein richtiges json
-    # raw_json_str = match.group(1)
-    # try:
-    #     icm_data = json.loads(raw_json_str)
-    # except json.JSONDecodeError:
-    #     try:
-    #         unescaped = json.loads(f'"{raw_json_str}"')
-    #         icm_data = json.loads(unescaped)
-    #     except Exception as e2:
-    #         print("Konnte ICM nicht lesen:", e2)
-    #         print("Rohdaten:", raw_json_str)
-    #         return msg.strip(), None
-
-
-    # user_icm_state = [icm_data['friendliness'], icm_data['dominance']]
-
-    # msg_clean = re.sub(r"<icm>.*?</ic(?:m)", "", msg).strip()
-
-    #print(f"ICM-Update: User war (f={user_icm_state[0]}, d={user_icm_state[1]}), LLM war (f={llm_icm_state[0]}, d={llm_icm_state[1]}), jetzt (f={new_llm_state[0]}, d={new_llm_state[1]})")
 
     # === log speichern ===
     conversation_log.append({
         "id": str(uuid.uuid4()),
         "timestamp": datetime.now().isoformat(),
+        "bot": "IPC_Framework",
         "prompt": prompt,
-        "response": msg_clean,
-        #"user_icm": icm_data,
+        "response": msg,
         "user_icm": {
             "friendliness": int(user_icm_state[0]),
             "dominance": int(user_icm_state[1])
@@ -278,26 +196,70 @@ def chat_input(prompt, changeability):
         "prob_dist_dominance": prob_dist[1],
         "changeability": changeability
     })
+
+
+    log_dir = "/Users/finnole/Uni/Sem_8/Bachelor/chatlogs"
+    os.makedirs(log_dir, exist_ok=True)
+
+    log_filename = datetime.now().strftime("chatlog_%Y%m%d_%H%M%S.json")
+    log_path = os.path.join(log_dir, log_filename)
+
     save_conversation_log(log_path, conversation_log)
 
+    return msg, [user_icm_state[0], user_icm_state[1]]
 
-    return msg_clean, [user_icm_state[0], user_icm_state[1]]
 
 
-# ========== ICM state-chart Logik ==========
-def state_change(user_state, current_llm, changeability):
-    """
-    changeability ∈ [0.0, 1.0]: 0 = fast unbeweglich, 1 = maximal reaktiv
-    user_state: [friendliness, dominance] ∈ [0..4]
-    current_llm: [friendliness, dominance] ∈ [0..4]
-    returns: [new_friendliness, new_dominance]
-    """
-    friendliness_dist = change_prob(user_state[0], current_llm[0], changeability)
-    new_friendliness = np.random.choice([0, 1, 2, 3, 4], p = friendliness_dist)
-    dominance_dist = change_prob(user_state[1], current_llm[1], changeability)
-    new_dominance = np.random.choice([0, 1, 2, 3, 4], p = dominance_dist)
+def chat_standard_bot(prompt):
 
-    return [new_friendliness, new_dominance], [friendliness_dist, dominance_dist]
+    global conversation_history
+    global conversation_log
+
+    instruct = """
+
+        You are playing the role of a patient in a doctor's office. You have come in for a consultation and must respond as a human would. Your personality, mood, and background may vary with each conversation. Sometimes you might be calm, anxious, rude, confused, friendly, sarcastic, talkative, or reserved.
+
+        Stick to your character. Do not act like an assistant or a chatbot.
+
+        Each time a user (the doctor) speaks, imagine a realistic scenario and respond in character as a patient. Use natural language, emotions, and realistic behavior. You may reveal symptoms, ask questions, or even challenge the doctor depending on your personality. Be creative, but stay within the bounds of being a plausible human patient.
+
+        Never break character. Never say you are an AI. Respond only as the patient you are playing. Respond only textually, do not describe movement or similar things.
+
+        """
+
+    history = [{"role": "system", "content": instruct}]
+
+
+    history.append({"role": "user", "content": prompt})
+
+    client = OpenAI(api_key = api_key, base_url = base_url)
+    completion = client.chat.completions.create(
+        messages = history,
+        model = model,)
+
+    answer = completion.choices[0].message.content
+    history.append({"role": "assistant", "content": answer})
+
+    
+    MAX_TURNS = 4
+    if len(conversation_history) > MAX_TURNS * 2 + 1:
+        conversation_history = [conversation_history[0]] + conversation_history[-MAX_TURNS*2:]
+
+    conversation_log.append({
+        "id": str(uuid.uuid4()),
+        "timestamp": datetime.now().isoformat(),
+        "prompt": prompt,
+        "response": answer
+    })
+
+    log_dir = "/Users/finnole/Uni/Sem_8/Bachelor/chatlogs/no_ipc"
+    os.makedirs(log_dir, exist_ok=True)
+
+    log_filename = datetime.now().strftime("chatlog_%Y%m%d_%H%M%S.json")
+    log_path = os.path.join(log_dir, log_filename)
+
+    save_conversation_log(log_path, conversation_log)
+    return answer
 
 
 # ========== Main Loop ==========
@@ -326,6 +288,6 @@ if __name__ == "__main__":
                 print("Verwendung: 'change 0.5' — eine Zahl zwischen 0.0 und 1.0.")
             continue
 
-        resp, icm = chat_input(user_input, changeability)
-        #resp = chat_input(user_input, changeability)
+        #resp, icm = chat_IPC_Bot(user_input, changeability)
+        resp = chat_standard_bot(user_input)
         print("Chatbot:", resp)
