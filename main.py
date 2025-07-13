@@ -174,7 +174,7 @@ def chat_IPC_Bot(prompt, changeability):
 
     #Kürze Verlauf, wenn zu lang (4 Dialogrunden = 8 Nachrichten)
     MAX_TURNS = 4
-    if len(conversation_history) > MAX_TURNS * 2 + 1:
+    if len(conversation_history) > MAX_TURNS * 2:
         conversation_history = [conversation_history[0]] + conversation_history[-MAX_TURNS*2:]
 
     # === log speichern ===
@@ -227,27 +227,27 @@ def chat_standard_bot(prompt):
 
         """
 
-    history = [{"role": "system", "content": instruct}]
 
 
-    history.append({"role": "user", "content": prompt})
+    conversation_history.append({"role": "user", "content": prompt})
 
     client = OpenAI(api_key = api_key, base_url = base_url)
     completion = client.chat.completions.create(
-        messages = history,
+        messages =  [{"role": "developer", "content": instruct}] + conversation_history,
         model = model,)
 
     answer = completion.choices[0].message.content
-    history.append({"role": "assistant", "content": answer})
+    conversation_history.append({"role": "assistant", "content": answer})
 
     
     MAX_TURNS = 4
-    if len(conversation_history) > MAX_TURNS * 2 + 1:
+    if len(conversation_history) > MAX_TURNS * 2:
         conversation_history = [conversation_history[0]] + conversation_history[-MAX_TURNS*2:]
 
     conversation_log.append({
         "id": str(uuid.uuid4()),
         "timestamp": datetime.now().isoformat(),
+        "bot": "gpt_default",
         "prompt": prompt,
         "response": answer
     })
